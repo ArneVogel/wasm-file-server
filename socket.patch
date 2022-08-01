@@ -1,0 +1,102 @@
+diff --git a/crates/wasi-common/cap-std-sync/src/lib.rs b/crates/wasi-common/cap-std-sync/src/lib.rs
+index b0b9ead50..a84014928 100644
+--- a/crates/wasi-common/cap-std-sync/src/lib.rs
++++ b/crates/wasi-common/cap-std-sync/src/lib.rs
+@@ -135,6 +135,18 @@ impl WasiCtxBuilder {
+         self.0.insert_file(fd, file, caps);
+         Ok(self)
+     }
++    pub fn push_preopened_socket(mut self, socket: impl Into<Socket>) -> Result<Self, Error> {
++        let socket: Socket = socket.into();
++        let file: Box<dyn WasiFile> = socket.into();
++
++        let caps = FileCaps::FDSTAT_SET_FLAGS
++            | FileCaps::FILESTAT_GET
++            | FileCaps::READ
++            | FileCaps::POLL_READWRITE;
++
++        self.0.push_file(file, caps)?;
++        Ok(self)
++    }
+     pub fn build(self) -> WasiCtx {
+         self.0
+     }
+diff --git a/crates/wasi-common/src/ctx.rs b/crates/wasi-common/src/ctx.rs
+index f99a9f7ed..d9c7a2422 100644
+--- a/crates/wasi-common/src/ctx.rs
++++ b/crates/wasi-common/src/ctx.rs
+@@ -43,6 +43,10 @@ impl WasiCtx {
+             .insert_at(fd, Box::new(FileEntry::new(caps, file)));
+     }
+ 
++    pub fn push_file(&mut self, file: Box<dyn WasiFile>, caps: FileCaps) -> Result<u32, Error> {
++        self.table().push(Box::new(FileEntry::new(caps, file)))
++    }
++
+     pub fn insert_dir(
+         &mut self,
+         fd: u32,
+diff --git a/src/commands/run.rs b/src/commands/run.rs
+index 46c180751..86da368b7 100644
+--- a/src/commands/run.rs
++++ b/src/commands/run.rs
+@@ -462,21 +462,16 @@ fn populate_with_wasi(
+         let mut builder = WasiCtxBuilder::new();
+         builder = builder.inherit_stdio().args(argv)?.envs(vars)?;
+ 
+-        let mut num_fd: usize = 3;
++        for (name, dir) in preopen_dirs.into_iter() {
++            builder = builder.preopened_dir(dir, name)?;
++        }
+ 
+         if listenfd {
+-            let (n, b) = ctx_set_listenfd(num_fd, builder)?;
+-            num_fd = n;
+-            builder = b;
++            builder = ctx_set_listenfd(builder)?;
+         }
+ 
+         for listener in tcplisten.drain(..) {
+-            builder = builder.preopened_socket(num_fd as _, listener)?;
+-            num_fd += 1;
+-        }
+-
+-        for (name, dir) in preopen_dirs.into_iter() {
+-            builder = builder.preopened_dir(dir, name)?;
++            builder = builder.push_preopened_socket(listener)?;
+         }
+ 
+         store.data_mut().wasi = Some(builder.build());
+@@ -510,16 +505,15 @@ fn populate_with_wasi(
+ }
+ 
+ #[cfg(not(unix))]
+-fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, WasiCtxBuilder)> {
+-    Ok((num_fd, builder))
++fn ctx_set_listenfd(builder: WasiCtxBuilder) -> Result<WasiCtxBuilder> {
++    Ok(builder)
+ }
+ 
+ #[cfg(unix)]
+-fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, WasiCtxBuilder)> {
++fn ctx_set_listenfd(builder: WasiCtxBuilder) -> Result<WasiCtxBuilder> {
+     use listenfd::ListenFd;
+ 
+     let mut builder = builder;
+-    let mut num_fd = num_fd;
+ 
+     for env in ["LISTEN_FDS", "LISTEN_FDNAMES"] {
+         if let Ok(val) = std::env::var(env) {
+@@ -533,10 +527,9 @@ fn ctx_set_listenfd(num_fd: usize, builder: WasiCtxBuilder) -> Result<(usize, Wa
+         if let Some(stdlistener) = listenfd.take_tcp_listener(i)? {
+             let _ = stdlistener.set_nonblocking(true)?;
+             let listener = TcpListener::from_std(stdlistener);
+-            builder = builder.preopened_socket((3 + i) as _, listener)?;
+-            num_fd = 3 + i;
++            builder = builder.push_preopened_socket(listener)?;
+         }
+     }
+ 
+-    Ok((num_fd, builder))
++    Ok(builder)
+ }
