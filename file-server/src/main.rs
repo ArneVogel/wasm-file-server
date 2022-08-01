@@ -62,7 +62,6 @@ async fn router(req: Request<Body>, state: Arc<State>) -> Result<Response<Body>>
             return_index(state.clone()).await
         }
         (&Method::GET, anything) => {
-            state.visitors.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             let mut s = String::from(anything);
             match anything.starts_with("/") {
                 true => s.insert_str(0, "public"),
@@ -91,9 +90,13 @@ fn not_found() -> Response<Body> {
 }
 
 async fn simple_file_send(filename: &str) -> Result<Response<Body>> {
+    let content_type = match filename.split(".").collect::<Vec<&str>>().pop() {
+        Some("css") => "text/css",
+        _ => "text/html; charset=utf-8",
+    };
     if let Ok(contents) = fs::read_to_string(filename) {
         let body = contents.into();
-        return Ok(Response::new(body));
+        return Ok(Response::builder().header("content-type", content_type).body(body).unwrap());
     }
     println!("could not open \"{}\": {:?}", filename, fs::read_to_string(filename).err());
     Ok(not_found())
