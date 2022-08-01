@@ -19,7 +19,7 @@ async fn get_tcplistener() -> TcpListener {
 #[cfg(target_os = "wasi")]
 async fn get_tcplistener() -> TcpListener {
     use std::os::wasi::io::FromRawFd;
-    let stdlistener = unsafe { std::net::TcpListener::from_raw_fd(3) };
+    let stdlistener = unsafe { std::net::TcpListener::from_raw_fd(4) };
     stdlistener.set_nonblocking(true).unwrap();
     TcpListener::from_std(stdlistener).unwrap()
 }
@@ -46,6 +46,9 @@ async fn response_examples(req: Request<Body>) -> Result<Response<Body>> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, anything) => {
             let mut s = String::from(anything);
+            if s == "/" {
+                s.push_str("index.html");
+            }
             match anything.starts_with("/") {
                 true => s.insert_str(0, "public"),
                 _ => return Ok(not_found()),
