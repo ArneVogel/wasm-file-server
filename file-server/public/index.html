@@ -1,15 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Hello, world!</title>
+    <title>WebAssembly Hosted!</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="description" content="" />
     <link rel="stylesheet" type="text/css" href="/style.css">
 </head>
 <body>
-    <h1>Hello, WebAssembly!</h1>
-    <p>Visited by <b>{{visitors}}</b> and liked by <b>{{likes}}</b></p>
+    <h1>Hello, from WebAssembly!</h1>
+    <p>This site is a proof of concept web server hosted by a WebAssembly module.<p>
+    <p>Compiled from Rust this module is being executed by wasmtime. For more information read my <a href="https://www.arnevogel.com/wasm-hosted">blog post</a>, or check out the <a href="https://github.com/ArneVogel/wasm-file-server">source code</a>.<p>
+    <br>
+    <p>Some wicked interactivity: this page has been visited by <b>{{visitors}}</b> people, <b>{{likes}}</b> of which liked it.</p>
     <form method="post" action="/like">
         <button type="submit" name="submit" value="submit">
             Like this
