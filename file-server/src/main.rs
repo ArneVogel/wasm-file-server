@@ -5,7 +5,6 @@ use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::task;
 
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Result, StatusCode};
@@ -58,9 +57,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             {
                 println!("Failed to serve connection: {:?}", err);
             }
-        });
-
-        task::spawn(async move {
             match OpenOptions::new()
                 .write(true)
                 .create(true)
