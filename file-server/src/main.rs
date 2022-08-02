@@ -1,8 +1,11 @@
 use hyper::server::conn::Http;
-use tokio::net::TcpListener;
 use std::fs;
-use std::sync::{Arc};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tokio::task;
 
 use hyper::service::service_fn;
 use hyper::{Body, Method, Request, Response, Result, StatusCode};
@@ -30,35 +33,67 @@ struct State {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let listener = get_tcplistener().await;
-    let state = Arc::new(State{visitors: AtomicUsize::new(0), likes: AtomicUsize::new(0)});
+    let res = if let Ok(contents) = fs::read_to_string("public/stats.txt") {
+        let split: Vec<&str> = contents.split("\n").collect();
+        let a = split[0].parse::<usize>().unwrap_or(0);
+        let b = split[1].parse::<usize>().unwrap_or(0);
+        (a, b)
+    } else {
+        (0, 0)
+    };
+    let state = Arc::new(State {
+        visitors: AtomicUsize::new(res.0),
+        likes: AtomicUsize::new(res.1),
+    });
 
     loop {
         let (stream, _) = listener.accept().await?;
         let state = state.clone();
+        let backup_state = state.clone();
 
         tokio::task::spawn(async move {
             if let Err(err) = Http::new()
-                .serve_connection(stream, service_fn(move |req| {
-                    router(req, state.clone())
-                }))
+                .serve_connection(stream, service_fn(move |req| router(req, state.clone())))
                 .await
             {
                 println!("Failed to serve connection: {:?}", err);
             }
         });
+
+        task::spawn(async move {
+            match OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open("public/stats.txt")
+            {
+                Ok(mut file) => {
+                    if let Err(e) = file.write(
+                        format!("{:?}\n{:?}", backup_state.visitors, backup_state.likes).as_bytes(),
+                    ) {
+                        println!("Could not write to public/stats.txt [{}]", e);
+                    }
+                }
+                Err(e) => {
+                    println!("Could not write stats: [{}]", e)
+                }
+            }
+        });
     }
 }
-
 
 async fn router(req: Request<Body>, state: Arc<State>) -> Result<Response<Body>> {
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/like") => {
-            state.likes.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            state
+                .likes
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             Ok(inc_like())
         }
 
         (&Method::GET, "/") | (&Method::GET, "/index.html") => {
-            state.visitors.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            state
+                .visitors
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             return_index(state.clone()).await
         }
         (&Method::GET, anything) => {
@@ -78,7 +113,8 @@ fn inc_like() -> Response<Body> {
     Response::builder()
         .status(301)
         .header("Location", "/")
-        .body("Back home!".into()).unwrap_or(not_found())
+        .body("Back home!".into())
+        .unwrap_or(not_found())
 }
 
 /// HTTP status code 404
@@ -96,9 +132,16 @@ async fn simple_file_send(filename: &str) -> Result<Response<Body>> {
     };
     if let Ok(contents) = fs::read_to_string(filename) {
         let body = contents.into();
-        return Ok(Response::builder().header("content-type", content_type).body(body).unwrap());
+        return Ok(Response::builder()
+            .header("content-type", content_type)
+            .body(body)
+            .unwrap());
     }
-    println!("could not open \"{}\": {:?}", filename, fs::read_to_string(filename).err());
+    println!(
+        "could not open \"{}\": {:?}",
+        filename,
+        fs::read_to_string(filename).err()
+    );
     Ok(not_found())
 }
 
